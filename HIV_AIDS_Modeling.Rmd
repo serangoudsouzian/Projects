@@ -1,0 +1,392 @@
+---
+title: "Modeling the Spread of HIV/AIDS"
+subtitle: "STAT 244NF: Infectious Disease Modeling"
+author: "Seran Goudsouzian"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(reshape2)
+library(ggplot2)
+library(dplyr)
+set.seed(126)
+```
+
+# Introduction
+  HIV, or Human Immunodeficiency Virus, is a virus that attacks CD4 cells in the human immune system. The CD4 cells, or T cells, are a type of white blood cell that plays an important role in the immune system. If there are too few CD4 cells, one would be at a much higher risk for infections and would have a very weak immune system. A normal CD4 count would be anything between 500-1500 cells/mm3, but HIV eventually kills off these cells, greatly decreasing their number over time. When people with HIV have a CD4 count below 200 cells/mm3, they are classified as having AIDS and have a high risk of having serious illnesses.
+  Before antiretroviral therapy (ART), HIV followed an SI pattern due to a lack of recovery/immunity after getting the virus. What I am specifically interested in modeling is a 5-year time period among the adult population of the US, assuming that HIV is an entirely new illness and that there is no immunity/recovery possible. My end goal is to simulate how HIV behaved in the first 5 years that it was introduced to the United States from 1981-1986 (with some limitations).
+
+# Simulations
+```{r}
+sim_pop <- 175000000
+```
+  For my simulations, I attempted to approximate the US adult population in the 1980s. I did not account for births/deaths because I focused on the adult population, and the number of deaths that would have naturally occurred would have been insignificant. Because I had 4 different ranges for probability of infection given contact(based on different contact methods), I did 4 separate simulations for both the deterministic and stochastic simulations, and I did 16 total simulations for the parameter-based stochastic simulations. I used a daily time scale. 
+
+PInfectious ranges:
+Receptive anal: 0.4% - 3.38%, meta-analysis estimate was 1.4%
+Insertive anal: 0.06% - 0.62%, no meta-analysis estimate (I used 0.34%)
+Receptive vaginal: 0.018% - 0.150%, meta-analysis estimate was 0.08%
+Insertive vaginal: 0.03% - 0.09%, meta-analysis estimate was 0.04%
+
+Reproductive number range: 2-5
+
+Time: 5 years
+
+$k_s$: 1 (further discussed in limitations)
+
+## Deterministic Simulation
+
+**Difference equations:**
+
+$S_{t+1}=S_t-\lambda_IS_t$
+
+$I_{t+1}=I_t+\lambda_IS_t$
+
+Where $S_t$ is the number of susceptible individuals at time t, $S_t$ is the number of infectious individuals at time t, and $\lambda_I$ is the parameter that represents the rate at which the disease spreads.
+
+**Description:**
+  I created a function that takes in population size (N), the initial values for the S and I categories (S0 and I0), the probability of infection given a contact (PInfectious), and time (Time). Within the function, lambda_t_fcn calculates $\lambda_I$ with the formula $\lambda_t=1-\exp\left\{- k_sp^c(t)\times \frac{I_{t-1}}{N}\right\}$, where $k_s$ = the number of sexual contacts per unit time and $p^c(t)$ is PInfectious. The function returns a "longform" dataframe with 3 columns- Count, Compartment, and Time. In total, I ran this function 4 times with 4 different PInfectious values to account for different transmission types. I kept every other input the same.
+
+```{r fig.align='center'}
+HIV_det = function(N, S0, I0, PInfectious, Time){
+  
+  SI_df <- data.frame(Time=0:Time,
+                     S=rep(NA, Time+1),
+                     I=rep(NA, Time+1),
+                     lambda_t=rep(NA, Time+1))
+  
+  lambda_t_fcn <- function(PInfectious, I_i, N){
+    return(1-exp((-1*PInfectious)*(I_i/N)))
+  }
+  
+  SI_df$S[1] <- S0
+  SI_df$I[1] <- I0
+  
+  for(i in 2:(Time + 1)){
+    SI_df$lambda_t[i] <- lambda_t_fcn(PInfectious=PInfectious, I_i=SI_df$I[i-1], N=N)
+    SI_df$S[i] <- SI_df$S[i-1]-(SI_df$lambda_t[i])*SI_df$S[i-1]
+    SI_df$I[i] <- SI_df$I[i-1]+(SI_df$lambda_t[i])*SI_df$S[i-1]
+  }
+  
+  sim_df2 <- melt(data=SI_df, id.vars="Time",
+                  measure.vars=c("S","I"),
+                  variable.name="Compartment",
+                  value.name="Count")
+  return(sim_df2)
+}
+```
+
+```{r}
+HIV_det_ra <- HIV_det(N=sim_pop, S0 = sim_pop-1, I0 = 1, PInfectious = 0.014, Time = 365*5)
+```
+
+```{r}
+ggplot(data=HIV_det_ra, aes(x=Time, y=Count)) + geom_line(aes(color=Compartment)) + labs(title = "HIV Deterministic Simulation: Receptive Anal", x = "Time(days)") + geom_vline(xintercept=1365, linetype="dashed")
+```
+```{r}
+HIV_det_ia <- HIV_det(N=sim_pop, S0 = sim_pop-1, I0 = 1, PInfectious = 0.0034, Time = 365*5)
+```
+
+```{r}
+ggplot(data=HIV_det_ia, aes(x=Time, y=Count)) + geom_line(aes(color=Compartment)) + labs(title = "HIV Deterministic Simulation: Insertive Anal", x = "Time(days)")
+```
+```{r}
+HIV_det_rv <- HIV_det(N=sim_pop, S0 = sim_pop-1, I0 = 1, PInfectious = 0.0008, Time = 365*5)
+```
+
+```{r}
+ggplot(data=HIV_det_rv, aes(x=Time, y=Count)) + geom_line(aes(color=Compartment)) + labs(title = "HIV Deterministic Simulation: Receptive Vaginal", x = "Time(days)")
+```
+```{r}
+HIV_det_iv <- HIV_det(N=sim_pop, S0 = sim_pop-1, I0 = 1, PInfectious = 0.0004, Time = 365*5)
+```
+
+```{r}
+ggplot(data=HIV_det_iv, aes(x=Time, y=Count)) + geom_line(aes(color=Compartment)) + labs(title = "HIV Deterministic Simulation: Insertive Vaginal", x = "Time(days)")
+```
+## Stochastic Simulations
+**Difference equations:**
+$S_{t+1}=S_t-I_{t+1}^{(SI)}$
+
+$I_{t+1}=I_t+I_{t+1}^{(SI)}$
+
+Where $S_t$ is the number of susceptible individuals at time t, $S_t$ is the number of infectious individuals at time t, and $I_t^{(SI)}$ is the number of newly infectious individuals at time t.
+
+$I_{t+1}^{(SI)}$ ~ Binomial($S_t, \lambda_{t+1}$)
+
+**Description:**
+  All parameters remain the same except for one specifying the number of iterations (nItr), which was always set to 500. Within the function, lambda_t_fcn still calculates $\lambda_t$ with the same formula as the deterministic model, but it serves as the probability for the binomial distribution instead of the parameter. Instead of count, the dataframe returns mean, median, 2.5 percentile, and 97.5 percentile, in addition to compartment and time. I ran 4 simulations with 500 trials each.
+
+```{r fig.align='center'}
+HIV_sto = function(N, S0, I0, PInfectious, Time, nItr){
+  sim_df <- data.frame(Time = character(0),S = character(0), I = character(0), I_SI = character(0), lambda_t = character(0), SimNum = character(0))
+  
+  for (j in 1:nItr){
+    SI_df <- data.frame(Time=0:Time,
+                       S=rep(NA, Time+1),
+                       I=rep(NA, Time+1),
+                       I_SI=rep(NA, Time+1),
+                       lambda_t=rep(NA, Time+1),
+                       SimNum = rep(j, Time+1))
+  
+  
+    lambda_t_fcn <- function(PInfectious, I_i, N){
+      return(1-exp((-1*PInfectious)*(I_i/N)))
+    }
+    
+    SI_df$S[1] <- S0
+    SI_df$I[1] <- I0
+    SI_df$I_SI[1] <- I0
+    SI_df$lambda_t[1] <- lambda_t_fcn(PInfectious=PInfectious, I_i=I0, N=N)
+    
+    for(i in 2:(Time + 1)){
+      SI_df$lambda_t[i] <- lambda_t_fcn(PInfectious=PInfectious, I_i=SI_df$I[i-1], N=N)
+      SI_df$I_SI[i] <- rbinom(n=1, size=SI_df$S[i-1], prob=SI_df$lambda_t[i])
+      SI_df$S[i] <- SI_df$S[i-1]-SI_df$I_SI[i]
+      SI_df$I[i] <- SI_df$I[i-1]+SI_df$I_SI[i]
+    }
+  sim_df <- rbind(sim_df, SI_df)
+  }
+  sim_df2 <- melt(data=sim_df, id.vars=c("Time","SimNum"),
+                  measure.vars=c("S","I"),
+                  variable.name="Compartment",
+                  value.name="Count")
+  
+  summary_df <- sim_df2 %>%
+    group_by(Time, Compartment) %>%
+    summarize(
+      mean=mean(Count),
+      median=quantile(Count, 0.5),
+      percentile_2.5=quantile(Count, 0.025),
+      percentile_97.5=quantile(Count, 0.975)
+    )
+  return(summary_df)
+}
+```
+
+```{r}
+HIV_sto_ra <- HIV_sto(N=sim_pop, S0 = sim_pop-1, I0 = 1, PInfectious = 0.014, Time = 365*5, nItr = 500)
+```
+
+```{r}
+ggplot(data=HIV_sto_ra, aes(x=Time, y=median)) +
+  geom_line(aes(color=Compartment), size=1.1) +
+  geom_ribbon(aes(ymin=percentile_2.5, ymax=percentile_97.5,
+                  fill=Compartment), alpha=0.1) +
+  xlab("Time (Days)") +
+  ylab("Compartment Count") + labs(title="HIV Stochastic Simulation: Receptive Anal") + geom_vline(xintercept=1390, linetype="dashed")
+```
+
+```{r}
+HIV_sto_ia <- HIV_sto(N=sim_pop, S0 = sim_pop-1, I0 = 1, PInfectious = 0.0034, Time = 365*5, nItr = 500)
+```
+
+
+```{r}
+ggplot(data=HIV_sto_ia, aes(x=Time, y=median)) +
+  geom_line(aes(color=Compartment), size=1.1) +
+  geom_ribbon(aes(ymin=percentile_2.5, ymax=percentile_97.5,
+                  fill=Compartment), alpha=0.1) +
+  xlab("Time (Days)") +
+  ylab("Compartment Count") + labs(title="HIV Stochastic Simulation: Insertive Anal")
+```
+
+```{r}
+HIV_sto_rv <- HIV_sto(N=sim_pop, S0 = sim_pop-1, I0 = 1, PInfectious = 0.0008, Time = 365*5, nItr = 500)
+```
+
+```{r}
+ggplot(data=HIV_sto_rv, aes(x=Time, y=median)) +
+  geom_line(aes(color=Compartment), size=1.1) +
+  geom_ribbon(aes(ymin=percentile_2.5, ymax=percentile_97.5,
+                  fill=Compartment), alpha=0.1) +
+  xlab("Time (Days)") +
+  ylab("Compartment Count") + labs(title="HIV Stochastic Simulation: Receptive Vaginal")
+```
+
+```{r}
+HIV_sto_iv <- HIV_sto(N=sim_pop, S0 = sim_pop-1, I0 = 1, PInfectious = 0.0004, Time = 365*5, nItr = 500)
+```
+
+```{r}
+ggplot(data=HIV_sto_iv, aes(x=Time, y=median)) +
+  geom_line(aes(color=Compartment), size=1.1) +
+  geom_ribbon(aes(ymin=percentile_2.5, ymax=percentile_97.5,
+                  fill=Compartment), alpha=0.1) +
+  xlab("Time (Days)") +
+  ylab("Compartment Count") + labs(title="HIV Stochastic Simulation: Insertive Vaginal")
+```
+
+
+## Stochastic Simulations Incorporating Ranges for Disease Dynamics
+
+**Description:**
+  The difference equations and function are the same as the other stochastic model. For each transmission type, I ran two simulations with 500 trials each for the lower and upper parameters of the necessary statistics. In total, I ran 8 simulations with different parameters (4000 trials total). Each simulation had a unique infectious probability based on the lower and upper ranges.
+
+Receptive anal:
+```{r fig.align='center'}
+HIV_sto_lp_ra <- HIV_sto(N=sim_pop, S0 = sim_pop-1, I0 = 1, PInfectious = 0.004, Time = 365*5, nItr = 500)
+```
+
+```{r}
+ggplot(data=HIV_sto_lp_ra, aes(x=Time, y=median)) +
+  geom_line(aes(color=Compartment), size=1.1) +
+  geom_ribbon(aes(ymin=percentile_2.5, ymax=percentile_97.5,
+                  fill=Compartment), alpha=0.1) +
+  xlab("Time (Days)") +
+  ylab("Compartment Count") + labs(title="HIV Stochastic Simulation (Minimum Parameters): Receptive Anal")
+```
+
+```{r fig.align='center'}
+HIV_sto_up_ra <- HIV_sto(N=sim_pop, S0 = sim_pop-1, I0 = 1, PInfectious = 0.0338, Time = 365*5, nItr = 500)
+```
+
+```{r}
+ggplot(data=HIV_sto_up_ra, aes(x=Time, y=median)) +
+  geom_line(aes(color=Compartment), size=1.1) +
+  geom_ribbon(aes(ymin=percentile_2.5, ymax=percentile_97.5,
+                  fill=Compartment), alpha=0.1) +
+  xlab("Time (Days)") +
+  ylab("Compartment Count") + labs(title="HIV Stochastic Simulation (Maximum Parameters): Receptive Anal") + geom_vline(xintercept=580, linetype="dashed")
+```
+
+
+Insertive anal: 
+
+```{r fig.align='center'}
+HIV_sto_lp_ia <- HIV_sto(N=sim_pop, S0 = sim_pop-1, I0 = 1, PInfectious = 0.0006, Time = 365*5, nItr = 500)
+```
+
+```{r}
+ggplot(data=HIV_sto_lp_ia, aes(x=Time, y=median)) +
+  geom_line(aes(color=Compartment), size=1.1) +
+  geom_ribbon(aes(ymin=percentile_2.5, ymax=percentile_97.5,
+                  fill=Compartment), alpha=0.1) +
+  xlab("Time (Days)") +
+  ylab("Compartment Count") + labs(title="HIV Stochastic Simulation (Mimimum Parameters): Insertive Anal")
+```
+
+
+```{r fig.align='center'}
+HIV_sto_up_ia <- HIV_sto(N=sim_pop, S0 = sim_pop-1, I0 = 1, PInfectious = 0.0062, Time = 365*5, nItr = 500)
+```
+
+```{r}
+ggplot(data=HIV_sto_up_ia, aes(x=Time, y=median)) +
+  geom_line(aes(color=Compartment), size=1.1) +
+  geom_ribbon(aes(ymin=percentile_2.5, ymax=percentile_97.5,
+                  fill=Compartment), alpha=0.1) +
+  xlab("Time (Days)") +
+  ylab("Compartment Count") + labs(title="HIV Stochastic Simulation (Maximum Parameters): Insertive Anal")
+```
+
+Receptive vaginal: 
+```{r fig.align='center'}
+HIV_sto_lp_rv <- HIV_sto(N=sim_pop, S0 = sim_pop-1, I0 = 1, PInfectious = 0.00018, Time = 365*5, nItr = 500)
+```
+
+```{r}
+ggplot(data=HIV_sto_lp_rv, aes(x=Time, y=median)) +
+  geom_line(aes(color=Compartment), size=1.1) +
+  geom_ribbon(aes(ymin=percentile_2.5, ymax=percentile_97.5,
+                  fill=Compartment), alpha=0.1) +
+  xlab("Time (Days)") +
+  ylab("Compartment Count") + labs(title="HIV Stochastic Simulation (Minimum Parameters): Receptive Vaginal")
+```
+
+```{r fig.align='center'}
+HIV_sto_up_rv <- HIV_sto(N=sim_pop, S0 = sim_pop-1, I0 = 1, PInfectious = 0.0015, Time = 365*5, nItr = 500)
+```
+
+```{r}
+ggplot(data=HIV_sto_up_rv, aes(x=Time, y=median)) +
+  geom_line(aes(color=Compartment), size=1.1) +
+  geom_ribbon(aes(ymin=percentile_2.5, ymax=percentile_97.5,
+                  fill=Compartment), alpha=0.1) +
+  xlab("Time (Days)") +
+  ylab("Compartment Count") + labs(title="HIV Stochastic Simulation (Maximum Parameters): Receptive Vaginal")
+```
+
+Insertive vaginal:
+```{r fig.align='center'}
+HIV_sto_lp_iv <- HIV_sto(N=sim_pop, S0 = sim_pop-1, I0 = 1, PInfectious = 0.0003, Time = 365*5, nItr = 500)
+```
+
+```{r}
+ggplot(data=HIV_sto_lp_iv, aes(x=Time, y=median)) +
+  geom_line(aes(color=Compartment), size=1.1) +
+  geom_ribbon(aes(ymin=percentile_2.5, ymax=percentile_97.5,
+                  fill=Compartment), alpha=0.1) +
+  xlab("Time (Days)") +
+  ylab("Compartment Count") + labs(title="HIV Stochastic Simulation (Minimum Parameters): Insertive Vaginal")
+```
+
+
+```{r fig.align='center'}
+HIV_sto_up_iv <- HIV_sto(N=sim_pop, S0 = sim_pop-1, I0 = 1, PInfectious = 0.0009, Time = 365*5, nItr = 500)
+```
+
+```{r}
+ggplot(data=HIV_sto_lp_iv, aes(x=Time, y=median)) +
+  geom_line(aes(color=Compartment), size=1.1) +
+  geom_ribbon(aes(ymin=percentile_2.5, ymax=percentile_97.5,
+                  fill=Compartment), alpha=0.1) +
+  xlab("Time (Days)") +
+  ylab("Compartment Count") + labs(title="HIV Stochastic Simulation (Maximum Parameters): Insertive Vaginal")
+```
+
+# Data Exploration
+https://www.cdc.gov/mmwr/preview/mmwrhtml/figures/m6021a2f.gif
+
+  The graph at the link above shows the progression of HIV/AIDS from 1981 to 2008. For my data comparison, I focused on the line representing the number of people living with HIV infections from 1981-1986. Based off of that data subset, HIV infectious followed a positive linear pattern, beginning with ~2,000 infections in 1981 and ending with ~32,000 infections in 1986. 
+
+  Most of my graphs did not have a pattern at all, and the infectious and susceptible counts stayed the same the entire time. The ones that did have a pattern had the infectious count increase at a much higher rate than the actual data, and in <5 years, the count was equal to the simulation population.
+
+  Overall, the real data differs because it covers all HIV cases, not just cases caused by sexual transmission methods. In addition, my data only represents the US adult population. My simulations assume that every adult has an equal chance of encountering one another with each transmission method, which is not the case.
+  
+# Discussion
+  In general, my simulations did not seem like an accurate representation of how HIV would have behaved in the first 5 years in the US. The only transmission method that produced an epidemic was receptive anal, which had the highest probability of infection given contact. Even when the upper parameters were used with the other 3 transmission methods, they did not produce an epidemic. 
+
+    With HIV, there are other, non-sexual transmission vehicles such as blood and breast milk, and one of the most common methods of transmission is the sharing of needles. Because of this, it can be assumed that there are several transmission types with different rates that affected the actual data from the beginning of the US epidemic that did not affect my simulation. 
+
+## Results and Conclusions
+  The data that I used for a comparison is not specific to transmission type, and does not account for age like my simulated population did. 
+ 
+  An epidemic was not produced often, and even when it was, it did not seem realistic. The growth of the infectious population seemed to follow an exponential pattern as opposed to a positive linear pattern, which meant that the infectious group would quickly become the entire population. 
+
+  The only 3 simulations that created an epidemic were the deterministic simulation for the receptive anal transmission method, the standard stochastic simulation for the receptive anal transmission method, and the maxiumum-parameter stochastic simulation for the receptive anal transmission method. After 5 years, the infected counts equaled the adult population of the US, which was not what happened with the real data.
+
+  I believe that a more complex model that accounted for multiple transmission methods would have been needed in order to create results that were more similar to that of the actual data from the start of the US epidemic.
+
+## Limitations
+  HIV has other transmission methods with different infectious probabilities that I could not account for. In addition, the models based on transmission type assumed that every US adult was equally likely to encounter one another, which is definitely untrue. 
+
+  The probabilities of infection given a contact that I used also had some limitations. For example, the risk associated with oral transmission could not be calculated because "...it is difficult to find people whose only risk of HIV transmission is unprotected oral sex" (Stanford Healthcare). 
+
+  When I was creating my simulations, I always assumed that an epidemic would begin with one infectious person, and set $I_0$ to always be 1. However, the data that I compared my results with begins with 2,000 infectious people. This could have accounted for some of the differences between my data and the actual data.
+
+  In addition, I couldn't figure out how to incorporate the reproductive number in my simulations, which may have affected their accuracy. Also, I attempted to calculate an appropriate estimate for $k_s$ based off of a daily time scale, but I never got results so I used a weekly scale (1 contact per week). When I used this method, I got the same values for $\lambda_t$ as I had when I used the equation $\lambda_t = p^c(t)\times \frac{I_{t-1}}{N}$.
+
+  I could not find any datasets that modeled HIV with compartmental models.
+
+# References
+Infectious probabilities: https://stanfordhealthcare.org/medical-conditions/sexual-and-reproductive-health/hiv-aids/causes/risk-of-exposure.html
+
+HIV epidemic graph: https://www.cdc.gov/mmwr/preview/mmwrhtml/mm6021a2.htm
+
+HIV background information: https://www.cdc.gov/hiv/basics/
+
+Code: Lab 5, Homework 6, Lab 7, Lab 9, Homework 9
+
+Lecture Notes: Introduction to Stochastic Compartmental Models, Stochastic Models in R
+
+US population in 1981: https://countryeconomy.com/demography/population/usa?year=1981#:~:text=Population%20records%20increases%20in%20United,United%20States%20ranks%20No.
+
+US age percentages in 1981: https://www.childstats.gov/americaschildren/tables/pop2.asp
+
+To find $k_s$: https://www.apa.org/monitor/2017/06/numbers
+
+Data comparison graph: https://www.cdc.gov/mmwr/preview/mmwrhtml/mm6021a2.htm
+
